@@ -1,0 +1,14 @@
+/*
+  Access-Control-Allow-Origin: *
+  Access-Control-Allow-Methods: GET, POST, OPTIONS
+  Access-Control-Allow-Headers: *
+
+*.glb
+  Content-Type: model/gltf-binary
+  Cache-Control: public, max-age=31536000, immutable
+
+*.gltf
+  Content-Type: model/gltf+json
+
+*.wasm
+  Content-Type: application/wasm
