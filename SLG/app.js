@@ -21,7 +21,7 @@ class VRGLBViewer {
     this.navMode = 'orbit'; // 'orbit' | 'walk'
     this.isPointerLocked = false;
     this.walkKeys = { forward: false, backward: false, left: false, right: false, up: false, down: false, sprint: false };
-    this.walkSpeed = 5.0; // meters per second
+    this.walkSpeed = 2.5; // meters per second (half of original 5.0)
     this.sprintMultiplier = 2.5;
     this.cameraEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 
@@ -35,16 +35,18 @@ class VRGLBViewer {
     this.teleportValid = false;
     this.vrExitButtonDown = false;
 
-    // Viewport Helpers
-    this.gridHelper = null;
-    this.boxHelper = null;
-    this.groundPlane = null;
-    this.autoRotate = false;
+    // Mobile / Touch Screen Controls State
+    this.isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    this.touchControlsMode = 'auto'; // 'auto' | 'always' | 'never'
+    this.moveJoystick = { active: false, touchId: null, startX: 0, startY: 0, vectorX: 0, vectorY: 0 };
+    this.lookJoystick = { active: false, touchId: null, startX: 0, startY: 0, deltaX: 0, deltaY: 0 };
+    this.canvasTouchLook = { active: false, touchId: null, lastX: 0, lastY: 0 };
 
     this.initScene();
     this.initLoaders();
     this.initLighting();
     this.initDesktopControls();
+    this.initMobileControls();
     this.initWebXR();
     this.initUI();
     this.initDragAndDrop();
@@ -53,7 +55,10 @@ class VRGLBViewer {
     this.loadInitialModel();
 
     // Handle window resize
-    window.addEventListener('resize', () => this.onWindowResize());
+    window.addEventListener('resize', () => {
+      this.onWindowResize();
+      this.updateMobileControlsVisibility();
+    });
   }
 
   /* -------------------------------------------------------------------------- */
@@ -208,12 +213,14 @@ class VRGLBViewer {
   /*                            DESKTOP CONTROLS                                */
   /* -------------------------------------------------------------------------- */
   initDesktopControls() {
-    // 1. Orbit Controls (Target eye-level 1.1m)
+    // 1. Orbit Controls (Target eye-level 1.1m, limit pitch to +/-60 deg from horizontal)
     this.orbitControls = new OrbitControls(this.camera, this.renderer.domElement);
     this.orbitControls.enableDamping = true;
     this.orbitControls.dampingFactor = 0.06;
     this.orbitControls.maxDistance = 200;
     this.orbitControls.minDistance = 0.1;
+    this.orbitControls.minPolarAngle = (30 * Math.PI) / 180;  // +60° above horizontal (30° from zenith)
+    this.orbitControls.maxPolarAngle = (150 * Math.PI) / 180; // -60° below horizontal (150° from zenith)
     this.orbitControls.target.set(0, 1.1, 0);
     this.orbitControls.update();
 
@@ -280,6 +287,8 @@ class VRGLBViewer {
       // Sync camera euler with current camera orientation
       this.cameraEuler.setFromQuaternion(this.camera.quaternion);
     }
+
+    this.updateMobileControlsVisibility();
   }
 
   onKeyDown(e) {
@@ -357,34 +366,282 @@ class VRGLBViewer {
       this.cameraEuler.y -= movementX * sensitivity;
       this.cameraEuler.x -= movementY * sensitivity;
 
-      // Clamp vertical pitch to avoid flipping
-      this.cameraEuler.x = Math.max(-Math.PI / 2.05, Math.min(Math.PI / 2.05, this.cameraEuler.x));
+      // Clamp vertical pitch to +/- 60 degrees from horizontal
+      const maxPitch = (60 * Math.PI) / 180;
+      this.cameraEuler.x = Math.max(-maxPitch, Math.min(maxPitch, this.cameraEuler.x));
       this.camera.quaternion.setFromEuler(this.cameraEuler);
     }
   }
 
   updateDesktopWalk(delta) {
-    if (this.navMode !== 'walk' || !this.isPointerLocked) return;
+    if (this.navMode !== 'walk') return;
 
     const actualSpeed = (this.walkKeys.sprint ? this.walkSpeed * this.sprintMultiplier : this.walkSpeed) * delta;
     const moveDir = new THREE.Vector3();
 
-    if (this.walkKeys.forward) moveDir.z -= 1;
-    if (this.walkKeys.backward) moveDir.z += 1;
-    if (this.walkKeys.left) moveDir.x -= 1;
-    if (this.walkKeys.right) moveDir.x += 1;
-    moveDir.normalize();
+    // Combine Keyboard WASD + Mobile Virtual Joystick
+    const inputX = (this.walkKeys.right ? 1 : 0) - (this.walkKeys.left ? 1 : 0) + this.moveJoystick.vectorX;
+    const inputZ = (this.walkKeys.backward ? 1 : 0) - (this.walkKeys.forward ? 1 : 0) - this.moveJoystick.vectorY;
 
-    // Move in direction the camera is facing horizontally
-    const cameraYaw = new THREE.Euler(0, this.cameraEuler.y, 0, 'YXZ');
-    moveDir.applyEuler(cameraYaw);
-    moveDir.multiplyScalar(actualSpeed);
+    if (Math.abs(inputX) > 0.02 || Math.abs(inputZ) > 0.02) {
+      moveDir.x = inputX;
+      moveDir.z = inputZ;
+      if (moveDir.length() > 1) moveDir.normalize();
 
-    this.cameraRig.position.add(moveDir);
+      // Move in direction the camera is facing horizontally
+      const cameraYaw = new THREE.Euler(0, this.cameraEuler.y, 0, 'YXZ');
+      moveDir.applyEuler(cameraYaw);
+      moveDir.multiplyScalar(actualSpeed);
 
-    // Vertical flight elevation (Space up, C down - unclamped to allow ground level and basement exploration)
+      this.cameraRig.position.add(moveDir);
+    }
+
+    // Apply Look Joystick rotation (continuous look when thumb is pushed)
+    if (this.lookJoystick.active && (Math.abs(this.lookJoystick.deltaX) > 0.02 || Math.abs(this.lookJoystick.deltaY) > 0.02)) {
+      const lookSpeed = 2.2 * delta;
+      this.cameraEuler.y -= this.lookJoystick.deltaX * lookSpeed;
+      this.cameraEuler.x -= this.lookJoystick.deltaY * lookSpeed;
+      const maxPitch = (60 * Math.PI) / 180;
+      this.cameraEuler.x = Math.max(-maxPitch, Math.min(maxPitch, this.cameraEuler.x));
+      this.camera.quaternion.setFromEuler(this.cameraEuler);
+    }
+
+    // Vertical flight elevation (Space / ▲ up, C / ▼ down - unclamped)
     if (this.walkKeys.up) this.cameraRig.position.y += actualSpeed;
     if (this.walkKeys.down) this.cameraRig.position.y -= actualSpeed;
+  }
+
+  /* -------------------------------------------------------------------------- */
+  /*                       MOBILE & TOUCH SCREEN CONTROLS                       */
+  /* -------------------------------------------------------------------------- */
+  initMobileControls() {
+    const moveZone = document.getElementById('joystick-move-zone');
+    const moveBase = document.getElementById('joystick-move-base');
+    const moveStick = document.getElementById('joystick-move-stick');
+    const lookZone = document.getElementById('joystick-look-zone');
+    const lookBase = document.getElementById('joystick-look-base');
+    const lookStick = document.getElementById('joystick-look-stick');
+    const btnUp = document.getElementById('btn-touch-up');
+    const btnDown = document.getElementById('btn-touch-down');
+    const btnSprint = document.getElementById('btn-touch-sprint');
+    const touchModeSelect = document.getElementById('touch-controls-mode');
+
+    if (!moveZone || !lookZone) return;
+
+    const maxRadius = 38;
+
+    // --- LEFT JOYSTICK (Movement) ---
+    const handleMoveTouchStart = (e) => {
+      e.preventDefault();
+      const touch = e.changedTouches[0];
+      this.moveJoystick.active = true;
+      this.moveJoystick.touchId = touch.identifier;
+      const rect = moveBase.getBoundingClientRect();
+      this.moveJoystick.startX = rect.left + rect.width / 2;
+      this.moveJoystick.startY = rect.top + rect.height / 2;
+      moveBase.classList.add('active');
+    };
+
+    const handleMoveTouchMove = (e) => {
+      if (!this.moveJoystick.active) return;
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const touch = e.changedTouches[i];
+        if (touch.identifier === this.moveJoystick.touchId) {
+          e.preventDefault();
+          const dx = touch.clientX - this.moveJoystick.startX;
+          const dy = touch.clientY - this.moveJoystick.startY;
+          const dist = Math.hypot(dx, dy);
+          const clampedDist = Math.min(dist, maxRadius);
+          const angle = Math.atan2(dy, dx);
+          const clampedX = Math.cos(angle) * clampedDist;
+          const clampedY = Math.sin(angle) * clampedDist;
+
+          moveStick.style.transform = `translate(${clampedX}px, ${clampedY}px)`;
+          this.moveJoystick.vectorX = clampedX / maxRadius;
+          this.moveJoystick.vectorY = -(clampedY / maxRadius); // negative Y = forward
+          break;
+        }
+      }
+    };
+
+    const handleMoveTouchEnd = (e) => {
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const touch = e.changedTouches[i];
+        if (touch.identifier === this.moveJoystick.touchId) {
+          this.moveJoystick.active = false;
+          this.moveJoystick.touchId = null;
+          this.moveJoystick.vectorX = 0;
+          this.moveJoystick.vectorY = 0;
+          moveStick.style.transform = 'translate(0px, 0px)';
+          moveBase.classList.remove('active');
+          break;
+        }
+      }
+    };
+
+    moveZone.addEventListener('touchstart', handleMoveTouchStart, { passive: false });
+    window.addEventListener('touchmove', handleMoveTouchMove, { passive: false });
+    window.addEventListener('touchend', handleMoveTouchEnd, { passive: false });
+    window.addEventListener('touchcancel', handleMoveTouchEnd, { passive: false });
+
+    // --- RIGHT JOYSTICK (Look / Rotate) ---
+    const handleLookTouchStart = (e) => {
+      e.preventDefault();
+      const touch = e.changedTouches[0];
+      this.lookJoystick.active = true;
+      this.lookJoystick.touchId = touch.identifier;
+      const rect = lookBase.getBoundingClientRect();
+      this.lookJoystick.startX = rect.left + rect.width / 2;
+      this.lookJoystick.startY = rect.top + rect.height / 2;
+      lookBase.classList.add('active');
+    };
+
+    const handleLookTouchMove = (e) => {
+      if (!this.lookJoystick.active) return;
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const touch = e.changedTouches[i];
+        if (touch.identifier === this.lookJoystick.touchId) {
+          e.preventDefault();
+          const dx = touch.clientX - this.lookJoystick.startX;
+          const dy = touch.clientY - this.lookJoystick.startY;
+          const dist = Math.hypot(dx, dy);
+          const clampedDist = Math.min(dist, maxRadius);
+          const angle = Math.atan2(dy, dx);
+          const clampedX = Math.cos(angle) * clampedDist;
+          const clampedY = Math.sin(angle) * clampedDist;
+
+          lookStick.style.transform = `translate(${clampedX}px, ${clampedY}px)`;
+          this.lookJoystick.deltaX = clampedX / maxRadius;
+          this.lookJoystick.deltaY = clampedY / maxRadius;
+          break;
+        }
+      }
+    };
+
+    const handleLookTouchEnd = (e) => {
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const touch = e.changedTouches[i];
+        if (touch.identifier === this.lookJoystick.touchId) {
+          this.lookJoystick.active = false;
+          this.lookJoystick.touchId = null;
+          this.lookJoystick.deltaX = 0;
+          this.lookJoystick.deltaY = 0;
+          lookStick.style.transform = 'translate(0px, 0px)';
+          lookBase.classList.remove('active');
+          break;
+        }
+      }
+    };
+
+    lookZone.addEventListener('touchstart', handleLookTouchStart, { passive: false });
+    window.addEventListener('touchmove', handleLookTouchMove, { passive: false });
+    window.addEventListener('touchend', handleLookTouchEnd, { passive: false });
+    window.addEventListener('touchcancel', handleLookTouchEnd, { passive: false });
+
+    // --- DIRECT TOUCH SWIPE TO LOOK ON CANVAS (Walk Mode) ---
+    this.renderer.domElement.addEventListener('touchstart', (e) => {
+      if (this.navMode === 'walk' && !this.renderer.xr.isPresenting) {
+        const touch = e.changedTouches[0];
+        if (!this.moveJoystick.active && !this.lookJoystick.active && !this.canvasTouchLook.active) {
+          this.canvasTouchLook.active = true;
+          this.canvasTouchLook.touchId = touch.identifier;
+          this.canvasTouchLook.lastX = touch.clientX;
+          this.canvasTouchLook.lastY = touch.clientY;
+        }
+      }
+    }, { passive: true });
+
+    this.renderer.domElement.addEventListener('touchmove', (e) => {
+      if (this.navMode === 'walk' && this.canvasTouchLook.active) {
+        for (let i = 0; i < e.changedTouches.length; i++) {
+          const touch = e.changedTouches[i];
+          if (touch.identifier === this.canvasTouchLook.touchId) {
+            const dx = touch.clientX - this.canvasTouchLook.lastX;
+            const dy = touch.clientY - this.canvasTouchLook.lastY;
+            this.canvasTouchLook.lastX = touch.clientX;
+            this.canvasTouchLook.lastY = touch.clientY;
+
+            const touchSensitivity = 0.0035;
+            this.cameraEuler.y -= dx * touchSensitivity;
+            this.cameraEuler.x -= dy * touchSensitivity;
+            const maxPitch = (60 * Math.PI) / 180;
+            this.cameraEuler.x = Math.max(-maxPitch, Math.min(maxPitch, this.cameraEuler.x));
+            this.camera.quaternion.setFromEuler(this.cameraEuler);
+            break;
+          }
+        }
+      }
+    }, { passive: true });
+
+    const handleCanvasTouchEnd = (e) => {
+      if (this.canvasTouchLook.active) {
+        for (let i = 0; i < e.changedTouches.length; i++) {
+          if (e.changedTouches[i].identifier === this.canvasTouchLook.touchId) {
+            this.canvasTouchLook.active = false;
+            this.canvasTouchLook.touchId = null;
+            break;
+          }
+        }
+      }
+    };
+    this.renderer.domElement.addEventListener('touchend', handleCanvasTouchEnd, { passive: true });
+    this.renderer.domElement.addEventListener('touchcancel', handleCanvasTouchEnd, { passive: true });
+
+    // --- ACTION BUTTONS (Fly Up, Fly Down, Sprint) ---
+    if (btnUp) {
+      btnUp.addEventListener('touchstart', (e) => { e.preventDefault(); this.walkKeys.up = true; btnUp.classList.add('active'); }, { passive: false });
+      btnUp.addEventListener('touchend', (e) => { e.preventDefault(); this.walkKeys.up = false; btnUp.classList.remove('active'); }, { passive: false });
+      btnUp.addEventListener('mousedown', () => { this.walkKeys.up = true; btnUp.classList.add('active'); });
+      window.addEventListener('mouseup', () => { if (this.walkKeys.up && !this.isTouchDevice) { this.walkKeys.up = false; btnUp.classList.remove('active'); } });
+    }
+
+    if (btnDown) {
+      btnDown.addEventListener('touchstart', (e) => { e.preventDefault(); this.walkKeys.down = true; btnDown.classList.add('active'); }, { passive: false });
+      btnDown.addEventListener('touchend', (e) => { e.preventDefault(); this.walkKeys.down = false; btnDown.classList.remove('active'); }, { passive: false });
+      btnDown.addEventListener('mousedown', () => { this.walkKeys.down = true; btnDown.classList.add('active'); });
+      window.addEventListener('mouseup', () => { if (this.walkKeys.down && !this.isTouchDevice) { this.walkKeys.down = false; btnDown.classList.remove('active'); } });
+    }
+
+    if (btnSprint) {
+      const toggleSprint = (e) => {
+        if (e) e.preventDefault();
+        this.walkKeys.sprint = !this.walkKeys.sprint;
+        btnSprint.classList.toggle('active', this.walkKeys.sprint);
+        this.showToast(this.walkKeys.sprint ? 'Sprint: ON (2.5x)' : 'Sprint: OFF (1.0x)', 'info');
+      };
+      btnSprint.addEventListener('touchstart', toggleSprint, { passive: false });
+      btnSprint.addEventListener('click', toggleSprint);
+    }
+
+    // --- Touch Mode Setting ---
+    if (touchModeSelect) {
+      touchModeSelect.addEventListener('change', (e) => {
+        this.touchControlsMode = e.target.value;
+        this.updateMobileControlsVisibility();
+      });
+    }
+
+    this.updateMobileControlsVisibility();
+  }
+
+  updateMobileControlsVisibility() {
+    const mobileControls = document.getElementById('mobile-controls');
+    if (!mobileControls) return;
+
+    const isTouch = this.isTouchDevice || window.innerWidth <= 768;
+
+    if (this.touchControlsMode === 'always') {
+      mobileControls.classList.remove('hidden');
+    } else if (this.touchControlsMode === 'never') {
+      mobileControls.classList.add('hidden');
+    } else {
+      // 'auto' mode: show in walk mode on touch devices / phones
+      if (this.navMode === 'walk' && isTouch && !this.renderer.xr.isPresenting) {
+        mobileControls.classList.remove('hidden');
+      } else {
+        mobileControls.classList.add('hidden');
+      }
+    }
   }
 
   /* -------------------------------------------------------------------------- */
@@ -569,7 +826,7 @@ class VRGLBViewer {
           const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
           const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
 
-          const speed = 2.5 * delta;
+          const speed = 1.25 * delta;
           const moveVector = new THREE.Vector3()
             .addScaledVector(forward, -axisY * speed)
             .addScaledVector(right, axisX * speed);

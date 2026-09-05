@@ -137,7 +137,41 @@
     </div>
   </div>
 
-  <!-- Pointer Lock Instructions Banner (for Walk mode) -->
+  <!-- On-Screen Virtual Joysticks & Action Buttons for Mobile / Touch Devices -->
+  <div id="mobile-controls" class="mobile-controls hidden">
+    <!-- Left Move Joystick Zone -->
+    <div id="joystick-move-zone" class="joystick-zone left">
+      <div id="joystick-move-base" class="joystick-base">
+        <div id="joystick-move-stick" class="joystick-stick"></div>
+      </div>
+      <span class="joystick-label">Move</span>
+    </div>
+
+    <!-- Vertical Flight / Action Touch Buttons -->
+    <div class="mobile-action-buttons">
+      <button id="btn-touch-up" class="touch-action-btn" title="Fly Up / Elevate">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polyline points="18 15 12 9 6 15"></polyline>
+        </svg>
+      </button>
+      <button id="btn-touch-sprint" class="touch-action-btn" title="Toggle Sprint Speed">⚡</button>
+      <button id="btn-touch-down" class="touch-action-btn" title="Fly Down / Descend">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Right Look Joystick Zone -->
+    <div id="joystick-look-zone" class="joystick-zone right">
+      <div id="joystick-look-base" class="joystick-base">
+        <div id="joystick-look-stick" class="joystick-stick"></div>
+      </div>
+      <span class="joystick-label">Look</span>
+    </div>
+  </div>
+
+  <!-- Pointer Lock Instructions Banner (for Walk mode on desktop) -->
   <div id="pointer-lock-banner" class="pointer-lock-banner hidden">
     <div class="banner-content">
       <p><strong>Walk Mode Active</strong></p>
@@ -257,6 +291,14 @@
             <span>Auto Rotate Model</span>
           </label>
         </div>
+        <div class="control-row" style="margin-top: 8px;">
+          <label>Touch Screen Joysticks</label>
+          <select id="touch-controls-mode" class="form-select">
+            <option value="auto" selected>📱 Auto (Mobile Touch Devices)</option>
+            <option value="always">🕹️ Always Show</option>
+            <option value="never">🚫 Never Show</option>
+          </select>
+        </div>
       </section>
 
       <!-- VR Settings & Locomotion Tuning -->
@@ -314,6 +356,18 @@
               <li><strong>Sprint:</strong> Hold <code>Shift</code></li>
               <li><strong>Elevate / Descend:</strong> <code>Space</code> / <code>C</code></li>
               <li><strong>Exit Walk Mode:</strong> Press <code>Esc</code></li>
+            </ul>
+          </div>
+
+          <!-- Mobile Touch Guide -->
+          <div class="guide-card">
+            <h4>📱 Mobile & Touch Controls</h4>
+            <ul>
+              <li><strong>Walk & Strafe:</strong> Drag Left Virtual Joystick</li>
+              <li><strong>Look Around:</strong> Drag Right Virtual Joystick or drag upper canvas</li>
+              <li><strong>Fly Up / Down:</strong> Tap <strong>▲</strong> / <strong>▼</strong> buttons</li>
+              <li><strong>Sprint:</strong> Tap <strong>⚡</strong> button</li>
+              <li><strong>Orbit Mode:</strong> 1-finger rotate, 2-finger pinch zoom & pan</li>
             </ul>
           </div>
 
