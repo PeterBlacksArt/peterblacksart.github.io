@@ -4,12 +4,6 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
-import { 
-  createPavilionDemo, 
-  createSciFiHubDemo, 
-  createGeometricShowcaseDemo, 
-  REMOTE_SAMPLES 
-} from './sample-models.js';
 
 /**
  * VR GLB Explorer & Viewer Main Application
@@ -32,13 +26,14 @@ class VRGLBViewer {
     this.cameraEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 
     // VR Teleportation & Locomotion State
-    this.vrLocomotionMode = 'teleport'; // 'teleport' | 'smooth' | 'both'
+    this.vrLocomotionMode = 'both'; // 'teleport' | 'smooth' | 'both'
     this.vrTurnMode = 'snap'; // 'snap' | 'smooth'
     this.snapTurnDebounce = false;
     this.vrHeightOffset = 0.0;
     this.teleportActive = false;
     this.teleportTarget = new THREE.Vector3();
     this.teleportValid = false;
+    this.vrExitButtonDown = false;
 
     // Viewport Helpers
     this.gridHelper = null;
@@ -54,7 +49,7 @@ class VRGLBViewer {
     this.initUI();
     this.initDragAndDrop();
 
-    // Load initial default model (checks for model.glb, default.glb, URL params, or demo)
+    // Load the first model from models/models.json unless a URL model is provided.
     this.loadInitialModel();
 
     // Handle window resize
@@ -402,11 +397,13 @@ class VRGLBViewer {
 
     // WebXR Session Listeners
     this.renderer.xr.addEventListener('sessionstart', () => {
+      this.vrExitButtonDown = false;
       this.showToast('Entered VR Session', 'vr');
       this.cameraRig.position.set(0, this.vrHeightOffset, 3);
     });
 
     this.renderer.xr.addEventListener('sessionend', () => {
+      this.vrExitButtonDown = false;
       this.showToast('Exited VR Session', 'vr');
     });
 
@@ -527,7 +524,7 @@ class VRGLBViewer {
         if (hit.face && hit.face.normal.y > 0.4 || hit.object === this.groundPlane) {
           this.teleportTarget.copy(hit.point);
           this.teleportReticle.position.copy(hit.point);
-          this.teleportReticle.position.y += 0.01;
+          // this.teleportReticle.position.y += 0.01;
           this.teleportValid = true;
           this.teleportReticle.material.color.set(0x8b5cf6);
         } else {
@@ -543,6 +540,18 @@ class VRGLBViewer {
     for (const source of session.inputSources) {
       if (!source.gamepad) continue;
 
+      // Left controller X button is button 4 in the XR standard gamepad mapping.
+      const xButtonPressed = source.handedness === 'left'
+        && source.gamepad.buttons[4]?.pressed === true;
+      if (xButtonPressed && !this.vrExitButtonDown) {
+        this.vrExitButtonDown = true;
+        session.end();
+        return;
+      }
+      if (!xButtonPressed && source.handedness === 'left') {
+        this.vrExitButtonDown = false;
+      }
+
       const axes = source.gamepad.axes;
       if (!axes || axes.length < 2) continue;
 
@@ -554,14 +563,10 @@ class VRGLBViewer {
       // LEFT CONTROLLER -> Movement (Smooth Locomotion)
       if (source.handedness === 'left' && (this.vrLocomotionMode === 'smooth' || this.vrLocomotionMode === 'both')) {
         if (Math.abs(axisX) > deadzone || Math.abs(axisY) > deadzone) {
-          const xrCamera = this.renderer.xr.getCamera();
-          const forward = new THREE.Vector3();
-          xrCamera.getWorldDirection(forward);
-          forward.y = 0;
-          forward.normalize();
-
-          const right = new THREE.Vector3();
-          right.crossVectors(xrCamera.up, forward).negate().normalize();
+          const headsetEuler = new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ');
+          const yaw = this.cameraRig.rotation.y + headsetEuler.y;
+          const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+          const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
 
           const speed = 2.5 * delta;
           const moveVector = new THREE.Vector3()
@@ -608,31 +613,68 @@ class VRGLBViewer {
       return;
     }
 
-    // 2. Check for local default model candidates in the project directory
-    const candidates = [
-      'model.glb',
-      'default.glb',
-      'models/model.glb',
-      'models/default.glb',
-      'model.gltf',
-      'default.gltf'
-    ];
-
-    for (const candidate of candidates) {
-      try {
-        const res = await fetch(candidate, { method: 'HEAD' });
-        if (res.ok && res.status === 200) {
-          console.log(`Auto-loading default model: ${candidate}`);
-          this.loadGLBUrl(candidate, candidate.split('/').pop());
-          return;
-        }
-      } catch (e) {
-        // Continue checking other candidates
+    try {
+      const models = await this.loadModelManifest();
+      if (models.length > 0) {
+        const model = models[0];
+        this.loadGLBUrl(model.url, model.name);
+        return;
       }
+    } catch (error) {
+      console.error('Unable to load models.json:', error);
     }
 
-    // 3. Fallback to built-in procedural gallery demo if no local default model is present
-    this.loadProceduralDemo('gallery');
+    this.showToast('No models found in the models folder', 'error');
+  }
+
+  loadModelManifest() {
+    if (!this.modelManifestPromise) {
+      this.modelManifestPromise = fetch('models/models.json', { cache: 'no-store' })
+        .then((response) => {
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return response.json();
+        })
+        .then((entries) => {
+          if (!Array.isArray(entries)) throw new Error('models.json must contain an array');
+
+          return entries
+            .filter((entry) => typeof entry === 'string' && entry.trim())
+            .map((fileName) => ({
+              name: fileName,
+              url: `models/${fileName.split('/').map(encodeURIComponent).join('/')}`
+            }));
+        });
+    }
+
+    return this.modelManifestPromise;
+  }
+
+  async populateModelMenu() {
+    const menu = document.getElementById('local-model-menu');
+
+    try {
+      const models = await this.loadModelManifest();
+      menu.replaceChildren();
+
+      if (models.length === 0) {
+        menu.textContent = 'No models found';
+        return;
+      }
+
+      models.forEach((model) => {
+        const item = document.createElement('button');
+        item.className = 'menu-item';
+        item.textContent = model.name;
+        item.addEventListener('click', () => {
+          document.getElementById('sample-menu').classList.remove('show');
+          this.loadGLBUrl(model.url, model.name);
+        });
+        menu.appendChild(item);
+      });
+    } catch (error) {
+      console.error('Unable to populate model menu:', error);
+      menu.textContent = 'Unable to load models';
+    }
   }
 
   loadGLBFile(file) {
@@ -686,18 +728,6 @@ class VRGLBViewer {
         this.showToast(`Error loading remote model: ${error.message || 'CORS / Network'}`, 'error');
       }
     );
-  }
-
-  loadProceduralDemo(key) {
-    let demo;
-    if (key === 'gallery') demo = createPavilionDemo();
-    else if (key === 'scifi') demo = createSciFiHubDemo();
-    else if (key === 'shapes') demo = createGeometricShowcaseDemo();
-
-    if (demo) {
-      this.processLoadedModel(demo.scene, demo.animations, demo.name);
-      this.showToast(`Loaded demo: ${demo.name}`, 'success');
-    }
   }
 
   processLoadedModel(modelScene, animations = [], name = '3D Model') {
@@ -953,18 +983,7 @@ class VRGLBViewer {
       sampleMenu.classList.remove('show');
     });
 
-    document.querySelectorAll('.menu-item').forEach((item) => {
-      item.addEventListener('click', (e) => {
-        const sampleKey = e.currentTarget.getAttribute('data-sample');
-        sampleMenu.classList.remove('show');
-
-        if (['gallery', 'scifi', 'shapes'].includes(sampleKey)) {
-          this.loadProceduralDemo(sampleKey);
-        } else if (REMOTE_SAMPLES[sampleKey]) {
-          this.loadGLBUrl(REMOTE_SAMPLES[sampleKey], e.currentTarget.textContent);
-        }
-      });
-    });
+    this.populateModelMenu();
 
     // 3. Navigation Modes
     document.getElementById('mode-orbit').addEventListener('click', () => this.setNavMode('orbit'));

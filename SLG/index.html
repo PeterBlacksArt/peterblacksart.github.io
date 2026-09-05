@@ -70,22 +70,14 @@
             <polyline points="2 17 12 22 22 17"></polyline>
             <polyline points="2 12 12 17 22 12"></polyline>
           </svg>
-          <span>Sample Models</span>
+          <span>Models</span>
           <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="6 9 12 15 18 9"></polyline>
           </svg>
         </button>
         <div id="sample-menu" class="dropdown-menu">
-          <div class="menu-header">Procedural Scenes</div>
-          <button class="menu-item" data-sample="gallery">🏛️ Modern Art Pavilion</button>
-          <button class="menu-item" data-sample="scifi">🛸 Sci-Fi Holo-Hub</button>
-          <button class="menu-item" data-sample="shapes">🔮 Geometric Showcase</button>
-          <div class="menu-divider"></div>
-          <div class="menu-header">Khronos glTF Samples</div>
-          <button class="menu-item" data-sample="damaged-helmet">🪖 Damaged Sci-Fi Helmet (PBR)</button>
-          <button class="menu-item" data-sample="duck">🦆 Classic Toy Duck</button>
-          <button class="menu-item" data-sample="flight-helmet">✈️ Aviator Helmet</button>
-          <button class="menu-item" data-sample="cesium-man">🚶 Animated Cesium Man</button>
+          <div class="menu-header">Models Folder</div>
+          <div id="local-model-menu" class="menu-loading">Loading models...</div>
         </div>
       </div>
 
@@ -273,9 +265,9 @@
         <div class="control-row">
           <label>VR Locomotion Mode</label>
           <select id="vr-locomotion-mode" class="form-select">
-            <option value="teleport" selected>🎯 Teleport Arc (Default)</option>
+            <option value="teleport">🎯 Teleport Arc</option>
             <option value="smooth">🕹️ Smooth Joystick Move</option>
-            <option value="both">⚡ Dual (Teleport + Smooth)</option>
+            <option value="both" selected>⚡ Dual (Teleport + Smooth, Default)</option>
           </select>
         </div>
         <div class="control-row">
@@ -354,7 +346,6 @@
   <div id="toast-container" class="toast-container"></div>
 
   <!-- Application Modules -->
-  <script type="module" src="sample-models.js"></script>
   <script type="module" src="app.js"></script>
 </body>
 </html>
