@@ -564,7 +564,8 @@ class VRGLBViewer {
       if (source.handedness === 'left' && (this.vrLocomotionMode === 'smooth' || this.vrLocomotionMode === 'both')) {
         if (Math.abs(axisX) > deadzone || Math.abs(axisY) > deadzone) {
           const headsetEuler = new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ');
-          const yaw = this.cameraRig.rotation.y + headsetEuler.y;
+          const cameraRigEuler = new THREE.Euler().setFromQuaternion(this.cameraRig.quaternion, 'YXZ');
+          const yaw = cameraRigEuler.y + headsetEuler.y;
           const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
           const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
 
