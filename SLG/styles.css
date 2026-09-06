@@ -57,8 +57,9 @@ body, html {
   right: 16px;
   height: 56px;
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
   align-items: center;
+  gap: 10px;
   padding: 0 16px;
   background: var(--panel-bg);
   backdrop-filter: var(--backdrop-blur);
@@ -71,9 +72,11 @@ body, html {
 }
 
 .brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  display: contents;
+}
+
+.brand-logo {
+  order: 1;
 }
 
 .brand-logo {
@@ -88,33 +91,11 @@ body, html {
 }
 
 .brand-info {
-  display: flex;
-  flex-direction: column;
-}
-
-.brand-title {
-  font-weight: 700;
-  font-size: 15px;
-  letter-spacing: -0.01em;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.vr-badge {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 2px 6px;
-  background: linear-gradient(135deg, rgba(139, 92, 246, 0.3), rgba(59, 130, 246, 0.3));
-  border: 1px solid var(--accent-vr);
-  border-radius: var(--radius-full);
-  color: #c4b5fd;
-  text-shadow: 0 0 8px var(--accent-vr-glow);
+  display: contents;
 }
 
 .brand-subtitle {
+  order: 3;
   font-size: 11px;
   color: var(--text-muted);
   max-width: 260px;
@@ -125,6 +106,7 @@ body, html {
 
 /* Action Buttons */
 .top-actions {
+  order: 2;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1006,7 +988,6 @@ input[type="color"] {
     right: 10px;
     height: 50px;
   }
-  .brand-title { font-size: 13px; }
   .brand-subtitle { display: none; }
   .action-btn span { display: none; }
   .side-panel {
